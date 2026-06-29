@@ -1,0 +1,128 @@
+# .github/workflows/ndk-build.yml
+name: Build JNI for Android 10+
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Android NDK
+      uses: android-actions/setup-android@v3
+      with:
+        packages: ndk-bundle
+    
+    - name: Compile JNI for Android 10+ (API 29+)
+      run: |
+        if [ ! -d "./jni" ]; then
+          echo "❌ Нет папки /jni/ в репозитории!"
+          exit 1
+        fi
+        
+        echo "📁 Найдены исходники:"
+        find ./jni -type f \( -name "*.c" -o -name "*.cpp" \)
+        
+        # Пути
+        NDK_PATH=$ANDROID_HOME/ndk-bundle
+        TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
+        OUTPUT_DIR=./libs
+        
+        # Android 10+ = API 29, но для совместимости используем 29 или 30
+        # Android 10 = API 29
+        # Android 11 = API 30
+        # Android 12 = API 31
+        # Android 13 = API 33
+        # Android 14 = API 34
+        API_LEVEL=29  # Минимальный для Android 10
+        
+        echo "📌 Целевой API: $API_LEVEL (Android 10+)"
+        
+        # Архитектуры для Android 10+ (64-битные приоритетны)
+        # arm64-v8a и armeabi-v7a для 32-битной совместимости
+        for ARCH in arm64-v8a armeabi-v7a x86 x86_64; do
+          echo "🔨 Компиляция для $ARCH (API $API_LEVEL)..."
+          
+          case $ARCH in
+            arm64-v8a)   CLANG="$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang" ;;
+            armeabi-v7a) CLANG="$TOOLCHAIN/bin/armv7a-linux-androideabi${API_LEVEL}-clang" ;;
+            x86)         CLANG="$TOOLCHAIN/bin/i686-linux-android${API_LEVEL}-clang" ;;
+            x86_64)      CLANG="$TOOLCHAIN/bin/x86_64-linux-android${API_LEVEL}-clang" ;;
+          esac
+          
+          mkdir -p "$OUTPUT_DIR/$ARCH"
+          
+          # Компилируем все .c и .cpp из /jni/
+          for SRC in ./jni/*.c ./jni/*.cpp; do
+            [ -f "$SRC" ] || continue
+            BASENAME=$(basename "$SRC" | sed 's/\.[^.]*$//')
+            
+            echo "  → Компиляция $BASENAME"
+            
+            # Флаги для Android 10+
+            $CLANG -O2 -fPIC \
+              -I"./jni" \
+              -I"$NDK_PATH/sysroot/usr/include" \
+              -I"$NDK_PATH/sysroot/usr/include/aarch64-linux-android" \
+              -D__ANDROID_API__=$API_LEVEL \
+              -DANDROID \
+              -D__ANDROID__ \
+              -Wall -Wextra \
+              -c "$SRC" \
+              -o "$OUTPUT_DIR/$ARCH/$BASENAME.o"
+            
+            # Линковка в .so для Android 10+
+            $CLANG -shared \
+              -o "$OUTPUT_DIR/$ARCH/lib$BASENAME.so" \
+              "$OUTPUT_DIR/$ARCH/$BASENAME.o" \
+              -lm -lc++_static \
+              -Wl,-soname,lib$BASENAME.so \
+              -Wl,--no-undefined \
+              -Wl,-z,noexecstack \
+              -Wl,-z,relro \
+              -Wl,-z,now
+              
+            # Проверка на наличие символов для Android 10
+            echo "  ✅ $BASENAME.so собран для Android 10+"
+          done
+        done
+        
+        echo ""
+        echo "✅ Компиляция завершена!"
+        echo "📦 Собраны библиотеки для Android 10+:"
+        find ./libs -name "*.so" -type f -exec file {} \;
+        
+        # Дополнительная проверка
+        echo ""
+        echo "🔍 Проверка совместимости с Android 10+:"
+        for SO in ./libs/*/*.so; do
+          echo "📄 $SO:"
+          readelf -h "$SO" | grep -E "Machine|Class" || true
+        done
+    
+    - name: Upload libraries for Android 10+
+      uses: actions/upload-artifact@v4
+      with:
+        name: jni-libs-android10
+        path: libs/
+        retention-days: 30
+    
+    - name: Create release package
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      run: |
+        zip -r jni-android10-libs.zip libs/
+        echo "📦 Пакет создан: jni-android10-libs.zip"
+        ls -lh jni-android10-libs.zip
+    
+    - name: Upload release package
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/upload-artifact@v4
+      with:
+        name: jni-android10-release
+        path: jni-android10-libs.zip
