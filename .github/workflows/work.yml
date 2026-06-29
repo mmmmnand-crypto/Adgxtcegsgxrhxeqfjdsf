@@ -13,11 +13,61 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        submodules: false  # Отключаем подмодули, скачаем сами
     
     - name: Setup Android NDK
       uses: android-actions/setup-android@v3
       with:
         packages: ndk-bundle
+    
+    - name: Download ImGui if missing
+      run: |
+        echo "📁 Проверяем папку imgui/"
+        ls -la ./jni/ || echo "Нет папки jni"
+        
+        if [ ! -d "./jni/imgui" ] || [ -z "$(ls -A ./jni/imgui 2>/dev/null)" ]; then
+          echo "📥 Скачиваем ImGui..."
+          
+          # Скачиваем последнюю версию ImGui
+          git clone --depth 1 https://github.com/ocornut/imgui.git ./jni/imgui_temp
+          
+          # Копируем все файлы
+          mkdir -p ./jni/imgui
+          cp -r ./jni/imgui_temp/* ./jni/imgui/
+          
+          # Удаляем лишнее
+          rm -rf ./jni/imgui_temp
+          rm -rf ./jni/imgui/.git
+          rm -rf ./jni/imgui/.github
+          rm -rf ./jni/imgui/examples
+          rm -rf ./jni/imgui/docs
+          
+          echo "✅ ImGui скачан!"
+          echo "📁 Файлы ImGui:"
+          ls -la ./jni/imgui/ | head -15
+        else
+          echo "✅ ImGui уже есть в папке:"
+          ls -la ./jni/imgui/ | head -15
+        fi
+    
+    - name: Fix include paths
+      run: |
+        if [ -f "./jni/main.cpp" ]; then
+          echo "🔧 Исправляем include пути в main.cpp..."
+          
+          # Показываем текущие include
+          echo "Текущие include:"
+          grep -n "#include.*imgui" ./jni/main.cpp || echo "Нет include imgui"
+          
+          # Исправляем пути
+          sed -i 's|#include <\./imgui/|#include <imgui/|g' ./jni/main.cpp
+          sed -i 's|#include "\./imgui/|#include "imgui/|g' ./jni/main.cpp
+          
+          # Проверяем после исправления
+          echo "После исправления:"
+          grep -n "#include.*imgui" ./jni/main.cpp || echo "Нет include imgui"
+        fi
     
     - name: Compile JNI with ImGui for Android 10+
       run: |
@@ -30,10 +80,11 @@ jobs:
         ls -la ./jni/
         
         if [ -d "./jni/imgui" ]; then
-          echo "✅ Найдена папка imgui/"
+          echo "✅ Найдена папка imgui/ с файлами:"
           ls -la ./jni/imgui/ | head -20
-        else
-          echo "⚠️ Папка imgui/ не найдена в /jni/"
+          echo ""
+          echo "📁 Backends:"
+          ls -la ./jni/imgui/backends/ 2>/dev/null | head -10 || echo "Нет папки backends"
         fi
         
         # Пути
@@ -45,7 +96,7 @@ jobs:
         # Android 10 = API 29
         API_LEVEL=29
         
-        # Пути для заголовков - указываем все папки с imgui
+        # Пути для заголовков
         INCLUDES="-I./jni \
                   -I./jni/imgui \
                   -I./jni/imgui/backends \
@@ -70,7 +121,7 @@ jobs:
                  -llog \
                  -lc++_static"
         
-        # Компиляция для всех архитектур
+        # Компиляция для архитектур
         for ARCH in arm64-v8a armeabi-v7a x86_64 x86; do
           echo ""
           echo "🔨 Компиляция для $ARCH..."
@@ -84,7 +135,7 @@ jobs:
           
           mkdir -p "$OUTPUT_DIR/$ARCH"
           
-          # Собираем все .cpp файлы из /jni/ и /jni/imgui/
+          # Собираем все .cpp файлы
           OBJS=""
           
           # Файлы в корне /jni/
@@ -92,8 +143,8 @@ jobs:
             [ -f "$SRC" ] || continue
             BASENAME=$(basename "$SRC" .cpp)
             OBJ="$OUTPUT_DIR/$ARCH/$BASENAME.o"
-            echo "  → $BASENAME.cpp (корень jni)"
-            $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ"
+            echo "  → $BASENAME.cpp"
+            $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ" || exit 1
             OBJS="$OBJS $OBJ"
           done
           
@@ -104,7 +155,7 @@ jobs:
               BASENAME=$(basename "$SRC" .cpp)
               OBJ="$OUTPUT_DIR/$ARCH/imgui_$BASENAME.o"
               echo "  → imgui/$BASENAME.cpp"
-              $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ"
+              $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ" || exit 1
               OBJS="$OBJS $OBJ"
             done
           fi
@@ -116,20 +167,10 @@ jobs:
               BASENAME=$(basename "$SRC" .cpp)
               OBJ="$OUTPUT_DIR/$ARCH/backends_$BASENAME.o"
               echo "  → imgui/backends/$BASENAME.cpp"
-              $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ"
+              $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ" || exit 1
               OBJS="$OBJS $OBJ"
             done
           fi
-          
-          # Собираем .c файлы если есть
-          for SRC in ./jni/*.c; do
-            [ -f "$SRC" ] || continue
-            BASENAME=$(basename "$SRC" .c)
-            OBJ="$OUTPUT_DIR/$ARCH/$BASENAME.o"
-            echo "  → $BASENAME.c"
-            $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ"
-            OBJS="$OBJS $OBJ"
-          done
           
           if [ -z "$OBJS" ]; then
             echo "  ⚠️ Нет файлов для компиляции!"
@@ -138,21 +179,16 @@ jobs:
           
           # Линковка в libnative.so
           echo "  → Линковка libnative.so"
-          $CLANG $LDFLAGS $OBJS -o "$OUTPUT_DIR/$ARCH/libnative.so"
+          $CLANG $LDFLAGS $OBJS -o "$OUTPUT_DIR/$ARCH/libnative.so" || exit 1
           
           # Проверка
           echo "  ✅ libnative.so ($ARCH) - $(ls -lh $OUTPUT_DIR/$ARCH/libnative.so | awk '{print $5}')"
-          readelf -h "$OUTPUT_DIR/$ARCH/libnative.so" | grep -E "Machine|Class" | sed 's/^/    /'
         done
         
         echo ""
         echo "✅ Компиляция завершена!"
         echo "📦 Собраны библиотеки:"
         find ./libs -name "*.so" -type f -exec ls -lh {} \;
-        
-        echo ""
-        echo "📂 Размеры библиотек по архитектурам:"
-        du -sh ./libs/*/
     
     - name: Upload libraries
       uses: actions/upload-artifact@v4
@@ -160,17 +196,3 @@ jobs:
         name: jni-libs-android10
         path: libs/
         retention-days: 30
-    
-    - name: Create release package
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      run: |
-        zip -r jni-android10-libs.zip libs/
-        echo "📦 Пакет создан: jni-android10-libs.zip"
-        ls -lh jni-android10-libs.zip
-    
-    - name: Upload release package
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: actions/upload-artifact@v4
-      with:
-        name: jni-android10-release
-        path: jni-android10-libs.zip
