@@ -1,9 +1,9 @@
 #include <jni.h>
 #include <android/native_window_jni.h>
 #include <android/log.h>
-#include <imgui/imgui.h>
-#include <imgui/backends/imgui_impl_android.h>
-#include <imgui/backends/imgui_impl_opengl3.h>
+#include <imgui.h>
+#include <imgui_impl_android.h>
+#include <imgui_impl_opengl3.h>
 
 #define LOG_TAG "ImGuiJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
