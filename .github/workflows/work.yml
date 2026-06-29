@@ -14,59 +14,58 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        submodules: false  # Отключаем подмодули, скачаем сами
+        submodules: false
     
     - name: Setup Android NDK
       uses: android-actions/setup-android@v3
       with:
         packages: ndk-bundle
     
-    - name: Download ImGui if missing
+    - name: Download and clean ImGui
       run: |
-        echo "📁 Проверяем папку imgui/"
-        ls -la ./jni/ || echo "Нет папки jni"
-        
         if [ ! -d "./jni/imgui" ] || [ -z "$(ls -A ./jni/imgui 2>/dev/null)" ]; then
           echo "📥 Скачиваем ImGui..."
-          
-          # Скачиваем последнюю версию ImGui
           git clone --depth 1 https://github.com/ocornut/imgui.git ./jni/imgui_temp
-          
-          # Копируем все файлы
           mkdir -p ./jni/imgui
           cp -r ./jni/imgui_temp/* ./jni/imgui/
-          
-          # Удаляем лишнее
           rm -rf ./jni/imgui_temp
           rm -rf ./jni/imgui/.git
           rm -rf ./jni/imgui/.github
           rm -rf ./jni/imgui/examples
           rm -rf ./jni/imgui/docs
-          
-          echo "✅ ImGui скачан!"
-          echo "📁 Файлы ImGui:"
-          ls -la ./jni/imgui/ | head -15
-        else
-          echo "✅ ImGui уже есть в папке:"
-          ls -la ./jni/imgui/ | head -15
         fi
+        
+        echo "🧹 Удаляем ненужные бекенды..."
+        # Удаляем все бекенды, кроме Android и OpenGL3
+        cd ./jni/imgui/backends
+        
+        # Список бекендов для удаления (все кроме Android и OpenGL3)
+        rm -f imgui_impl_allegro5.cpp imgui_impl_allegro5.h
+        rm -f imgui_impl_dx9.cpp imgui_impl_dx9.h
+        rm -f imgui_impl_dx10.cpp imgui_impl_dx10.h
+        rm -f imgui_impl_dx11.cpp imgui_impl_dx11.h
+        rm -f imgui_impl_dx12.cpp imgui_impl_dx12.h
+        rm -f imgui_impl_glfw.cpp imgui_impl_glfw.h
+        rm -f imgui_impl_glut.cpp imgui_impl_glut.h
+        rm -f imgui_impl_osx.cpp imgui_impl_osx.h
+        rm -f imgui_impl_sdl2.cpp imgui_impl_sdl2.h
+        rm -f imgui_impl_sdl3.cpp imgui_impl_sdl3.h
+        rm -f imgui_impl_win32.cpp imgui_impl_win32.h
+        rm -f imgui_impl_wgpu.cpp imgui_impl_wgpu.h
+        rm -f imgui_impl_vulkan.cpp imgui_impl_vulkan.h
+        rm -f imgui_impl_metal.mm imgui_impl_metal.h
+        
+        # Оставляем только Android и OpenGL3
+        echo "✅ Оставлены только Android и OpenGL3 бекенды:"
+        ls -la *.cpp *.h 2>/dev/null | grep -E "android|opengl3" || echo "Проверь файлы"
+        cd ../../..
     
     - name: Fix include paths
       run: |
         if [ -f "./jni/main.cpp" ]; then
-          echo "🔧 Исправляем include пути в main.cpp..."
-          
-          # Показываем текущие include
-          echo "Текущие include:"
-          grep -n "#include.*imgui" ./jni/main.cpp || echo "Нет include imgui"
-          
-          # Исправляем пути
           sed -i 's|#include <\./imgui/|#include <imgui/|g' ./jni/main.cpp
           sed -i 's|#include "\./imgui/|#include "imgui/|g' ./jni/main.cpp
-          
-          # Проверяем после исправления
-          echo "После исправления:"
-          grep -n "#include.*imgui" ./jni/main.cpp || echo "Нет include imgui"
+          echo "✅ Include paths fixed"
         fi
     
     - name: Compile JNI with ImGui for Android 10+
@@ -76,16 +75,8 @@ jobs:
           exit 1
         fi
         
-        echo "📁 Структура /jni/:"
-        ls -la ./jni/
-        
-        if [ -d "./jni/imgui" ]; then
-          echo "✅ Найдена папка imgui/ с файлами:"
-          ls -la ./jni/imgui/ | head -20
-          echo ""
-          echo "📁 Backends:"
-          ls -la ./jni/imgui/backends/ 2>/dev/null | head -10 || echo "Нет папки backends"
-        fi
+        echo "📁 Структура /jni/imgui/backends/:"
+        ls -la ./jni/imgui/backends/ | head -20
         
         # Пути
         NDK_PATH=$ANDROID_HOME/ndk-bundle
@@ -93,26 +84,23 @@ jobs:
         SYSROOT=$NDK_PATH/sysroot
         OUTPUT_DIR=./libs
         
-        # Android 10 = API 29
         API_LEVEL=29
         
-        # Пути для заголовков
         INCLUDES="-I./jni \
                   -I./jni/imgui \
                   -I./jni/imgui/backends \
                   -I$SYSROOT/usr/include \
                   -I$SYSROOT/usr/include/aarch64-linux-android"
         
-        echo "📌 Include пути:"
-        echo "$INCLUDES" | tr ' ' '\n'
-        
-        # Флаги компиляции
         CXXFLAGS="-O2 -fPIC -std=c++17 \
+                  -stdlib=libc++ \
                   -D__ANDROID_API__=$API_LEVEL \
                   -DANDROID \
                   -D__ANDROID__ \
                   -DIMGUI_IMPL_OPENGL_ES3 \
-                  -Wall -Wextra"
+                  -D__STDC_FORMAT_MACROS \
+                  -Wall -Wextra \
+                  -Wno-unused-parameter"
         
         LDFLAGS="-shared \
                  -Wl,-soname,libnative.so \
@@ -121,7 +109,6 @@ jobs:
                  -llog \
                  -lc++_static"
         
-        # Компиляция для архитектур
         for ARCH in arm64-v8a armeabi-v7a x86_64 x86; do
           echo ""
           echo "🔨 Компиляция для $ARCH..."
@@ -135,7 +122,6 @@ jobs:
           
           mkdir -p "$OUTPUT_DIR/$ARCH"
           
-          # Собираем все .cpp файлы
           OBJS=""
           
           # Файлы в корне /jni/
@@ -148,11 +134,16 @@ jobs:
             OBJS="$OBJS $OBJ"
           done
           
-          # Файлы в /jni/imgui/
+          # Файлы в /jni/imgui/ - только основные
           if [ -d "./jni/imgui" ]; then
             for SRC in ./jni/imgui/*.cpp; do
               [ -f "$SRC" ] || continue
               BASENAME=$(basename "$SRC" .cpp)
+              # Пропускаем demo файл (он большой и необязательный)
+              if [ "$BASENAME" == "imgui_demo" ]; then
+                echo "  ⏭️ Пропускаем imgui_demo.cpp"
+                continue
+              fi
               OBJ="$OUTPUT_DIR/$ARCH/imgui_$BASENAME.o"
               echo "  → imgui/$BASENAME.cpp"
               $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ" || exit 1
@@ -160,15 +151,16 @@ jobs:
             done
           fi
           
-          # Файлы в /jni/imgui/backends/
+          # Только Android и OpenGL3 бекенды
           if [ -d "./jni/imgui/backends" ]; then
-            for SRC in ./jni/imgui/backends/*.cpp; do
-              [ -f "$SRC" ] || continue
-              BASENAME=$(basename "$SRC" .cpp)
-              OBJ="$OUTPUT_DIR/$ARCH/backends_$BASENAME.o"
-              echo "  → imgui/backends/$BASENAME.cpp"
-              $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ" || exit 1
-              OBJS="$OBJS $OBJ"
+            for BACKEND in imgui_impl_android imgui_impl_opengl3; do
+              SRC="./jni/imgui/backends/${BACKEND}.cpp"
+              if [ -f "$SRC" ]; then
+                OBJ="$OUTPUT_DIR/$ARCH/${BACKEND}.o"
+                echo "  → backends/${BACKEND}.cpp"
+                $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ" || exit 1
+                OBJS="$OBJS $OBJ"
+              fi
             done
           fi
           
@@ -177,17 +169,14 @@ jobs:
             continue
           fi
           
-          # Линковка в libnative.so
           echo "  → Линковка libnative.so"
           $CLANG $LDFLAGS $OBJS -o "$OUTPUT_DIR/$ARCH/libnative.so" || exit 1
           
-          # Проверка
           echo "  ✅ libnative.so ($ARCH) - $(ls -lh $OUTPUT_DIR/$ARCH/libnative.so | awk '{print $5}')"
         done
         
         echo ""
         echo "✅ Компиляция завершена!"
-        echo "📦 Собраны библиотеки:"
         find ./libs -name "*.so" -type f -exec ls -lh {} \;
     
     - name: Upload libraries
