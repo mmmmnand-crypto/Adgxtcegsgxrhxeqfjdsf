@@ -1,5 +1,5 @@
 # .github/workflows/ndk-build.yml
-name: Build JNI for Android 10+
+name: Build JNI with ImGui for Android 10+
 
 on:
   push:
@@ -19,94 +19,142 @@ jobs:
       with:
         packages: ndk-bundle
     
-    - name: Compile JNI for Android 10+ (API 29+)
+    - name: Compile JNI with ImGui for Android 10+
       run: |
         if [ ! -d "./jni" ]; then
-          echo "❌ Нет папки /jni/ в репозитории!"
+          echo "❌ Нет папки /jni/!"
           exit 1
         fi
         
-        echo "📁 Найдены исходники:"
-        find ./jni -type f \( -name "*.c" -o -name "*.cpp" \)
+        echo "📁 Структура /jni/:"
+        ls -la ./jni/
+        
+        if [ -d "./jni/imgui" ]; then
+          echo "✅ Найдена папка imgui/"
+          ls -la ./jni/imgui/ | head -20
+        else
+          echo "⚠️ Папка imgui/ не найдена в /jni/"
+        fi
         
         # Пути
         NDK_PATH=$ANDROID_HOME/ndk-bundle
         TOOLCHAIN=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64
+        SYSROOT=$NDK_PATH/sysroot
         OUTPUT_DIR=./libs
         
-        # Android 10+ = API 29, но для совместимости используем 29 или 30
         # Android 10 = API 29
-        # Android 11 = API 30
-        # Android 12 = API 31
-        # Android 13 = API 33
-        # Android 14 = API 34
-        API_LEVEL=29  # Минимальный для Android 10
+        API_LEVEL=29
         
-        echo "📌 Целевой API: $API_LEVEL (Android 10+)"
+        # Пути для заголовков - указываем все папки с imgui
+        INCLUDES="-I./jni \
+                  -I./jni/imgui \
+                  -I./jni/imgui/backends \
+                  -I$SYSROOT/usr/include \
+                  -I$SYSROOT/usr/include/aarch64-linux-android"
         
-        # Архитектуры для Android 10+ (64-битные приоритетны)
-        # arm64-v8a и armeabi-v7a для 32-битной совместимости
-        for ARCH in arm64-v8a armeabi-v7a x86 x86_64; do
-          echo "🔨 Компиляция для $ARCH (API $API_LEVEL)..."
+        echo "📌 Include пути:"
+        echo "$INCLUDES" | tr ' ' '\n'
+        
+        # Флаги компиляции
+        CXXFLAGS="-O2 -fPIC -std=c++17 \
+                  -D__ANDROID_API__=$API_LEVEL \
+                  -DANDROID \
+                  -D__ANDROID__ \
+                  -DIMGUI_IMPL_OPENGL_ES3 \
+                  -Wall -Wextra"
+        
+        LDFLAGS="-shared \
+                 -Wl,-soname,libnative.so \
+                 -lm -lGLESv3 -lEGL \
+                 -landroid \
+                 -llog \
+                 -lc++_static"
+        
+        # Компиляция для всех архитектур
+        for ARCH in arm64-v8a armeabi-v7a x86_64 x86; do
+          echo ""
+          echo "🔨 Компиляция для $ARCH..."
           
           case $ARCH in
-            arm64-v8a)   CLANG="$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang" ;;
-            armeabi-v7a) CLANG="$TOOLCHAIN/bin/armv7a-linux-androideabi${API_LEVEL}-clang" ;;
-            x86)         CLANG="$TOOLCHAIN/bin/i686-linux-android${API_LEVEL}-clang" ;;
-            x86_64)      CLANG="$TOOLCHAIN/bin/x86_64-linux-android${API_LEVEL}-clang" ;;
+            arm64-v8a)   CLANG="$TOOLCHAIN/bin/aarch64-linux-android${API_LEVEL}-clang++" ;;
+            armeabi-v7a) CLANG="$TOOLCHAIN/bin/armv7a-linux-androideabi${API_LEVEL}-clang++" ;;
+            x86_64)      CLANG="$TOOLCHAIN/bin/x86_64-linux-android${API_LEVEL}-clang++" ;;
+            x86)         CLANG="$TOOLCHAIN/bin/i686-linux-android${API_LEVEL}-clang++" ;;
           esac
           
           mkdir -p "$OUTPUT_DIR/$ARCH"
           
-          # Компилируем все .c и .cpp из /jni/
-          for SRC in ./jni/*.c ./jni/*.cpp; do
+          # Собираем все .cpp файлы из /jni/ и /jni/imgui/
+          OBJS=""
+          
+          # Файлы в корне /jni/
+          for SRC in ./jni/*.cpp; do
             [ -f "$SRC" ] || continue
-            BASENAME=$(basename "$SRC" | sed 's/\.[^.]*$//')
-            
-            echo "  → Компиляция $BASENAME"
-            
-            # Флаги для Android 10+
-            $CLANG -O2 -fPIC \
-              -I"./jni" \
-              -I"$NDK_PATH/sysroot/usr/include" \
-              -I"$NDK_PATH/sysroot/usr/include/aarch64-linux-android" \
-              -D__ANDROID_API__=$API_LEVEL \
-              -DANDROID \
-              -D__ANDROID__ \
-              -Wall -Wextra \
-              -c "$SRC" \
-              -o "$OUTPUT_DIR/$ARCH/$BASENAME.o"
-            
-            # Линковка в .so для Android 10+
-            $CLANG -shared \
-              -o "$OUTPUT_DIR/$ARCH/lib$BASENAME.so" \
-              "$OUTPUT_DIR/$ARCH/$BASENAME.o" \
-              -lm -lc++_static \
-              -Wl,-soname,lib$BASENAME.so \
-              -Wl,--no-undefined \
-              -Wl,-z,noexecstack \
-              -Wl,-z,relro \
-              -Wl,-z,now
-              
-            # Проверка на наличие символов для Android 10
-            echo "  ✅ $BASENAME.so собран для Android 10+"
+            BASENAME=$(basename "$SRC" .cpp)
+            OBJ="$OUTPUT_DIR/$ARCH/$BASENAME.o"
+            echo "  → $BASENAME.cpp (корень jni)"
+            $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ"
+            OBJS="$OBJS $OBJ"
           done
+          
+          # Файлы в /jni/imgui/
+          if [ -d "./jni/imgui" ]; then
+            for SRC in ./jni/imgui/*.cpp; do
+              [ -f "$SRC" ] || continue
+              BASENAME=$(basename "$SRC" .cpp)
+              OBJ="$OUTPUT_DIR/$ARCH/imgui_$BASENAME.o"
+              echo "  → imgui/$BASENAME.cpp"
+              $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ"
+              OBJS="$OBJS $OBJ"
+            done
+          fi
+          
+          # Файлы в /jni/imgui/backends/
+          if [ -d "./jni/imgui/backends" ]; then
+            for SRC in ./jni/imgui/backends/*.cpp; do
+              [ -f "$SRC" ] || continue
+              BASENAME=$(basename "$SRC" .cpp)
+              OBJ="$OUTPUT_DIR/$ARCH/backends_$BASENAME.o"
+              echo "  → imgui/backends/$BASENAME.cpp"
+              $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ"
+              OBJS="$OBJS $OBJ"
+            done
+          fi
+          
+          # Собираем .c файлы если есть
+          for SRC in ./jni/*.c; do
+            [ -f "$SRC" ] || continue
+            BASENAME=$(basename "$SRC" .c)
+            OBJ="$OUTPUT_DIR/$ARCH/$BASENAME.o"
+            echo "  → $BASENAME.c"
+            $CLANG -c $CXXFLAGS $INCLUDES "$SRC" -o "$OBJ"
+            OBJS="$OBJS $OBJ"
+          done
+          
+          if [ -z "$OBJS" ]; then
+            echo "  ⚠️ Нет файлов для компиляции!"
+            continue
+          fi
+          
+          # Линковка в libnative.so
+          echo "  → Линковка libnative.so"
+          $CLANG $LDFLAGS $OBJS -o "$OUTPUT_DIR/$ARCH/libnative.so"
+          
+          # Проверка
+          echo "  ✅ libnative.so ($ARCH) - $(ls -lh $OUTPUT_DIR/$ARCH/libnative.so | awk '{print $5}')"
+          readelf -h "$OUTPUT_DIR/$ARCH/libnative.so" | grep -E "Machine|Class" | sed 's/^/    /'
         done
         
         echo ""
         echo "✅ Компиляция завершена!"
-        echo "📦 Собраны библиотеки для Android 10+:"
-        find ./libs -name "*.so" -type f -exec file {} \;
+        echo "📦 Собраны библиотеки:"
+        find ./libs -name "*.so" -type f -exec ls -lh {} \;
         
-        # Дополнительная проверка
         echo ""
-        echo "🔍 Проверка совместимости с Android 10+:"
-        for SO in ./libs/*/*.so; do
-          echo "📄 $SO:"
-          readelf -h "$SO" | grep -E "Machine|Class" || true
-        done
+        echo "📂 Размеры библиотек по архитектурам:"
+        du -sh ./libs/*/
     
-    - name: Upload libraries for Android 10+
+    - name: Upload libraries
       uses: actions/upload-artifact@v4
       with:
         name: jni-libs-android10
