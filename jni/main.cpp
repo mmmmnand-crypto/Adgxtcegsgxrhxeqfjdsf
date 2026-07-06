@@ -16,7 +16,7 @@ extern "C" {
 
 // Инициализация ImGui
 JNIEXPORT void JNICALL
-Java_com_blackhub_bronline_game_core_JNILib_init(
+Java_com_blackhub_bronline_game_core_JNILib_initIm(
     JNIEnv* env, 
     jclass clazz, 
     jobject surface) {
