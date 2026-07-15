@@ -27,7 +27,7 @@ extern "C" void DrawElements(uint32_t w0, uint32_t w1, uint32_t w2, uint64_t x3)
 		std::abort();
 	}
 	hook.push_back({(uint64_t)w0,(uint64_t)w1,(uint64_t)w2,x3});
-	my_glDrawElements(w0, w1, w2, x3);
+	my_glDrawElements(w0, w1, w2, (const void*)x3);
 }
 
 
