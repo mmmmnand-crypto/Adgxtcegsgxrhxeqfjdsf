@@ -1,6 +1,7 @@
-#define _GNU_SOURCE
+
 #include <link.h>
-#include <GL/gl.h>
+#include <GLES3/gl3.h>  // Для OpenGL ES 3.0
+#include <GLES3/gl3ext.h> // Расl
 #include <jni.h>
 #include <iostream>
 #include <cstring>

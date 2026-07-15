@@ -36,9 +36,12 @@ jobs:
         
         API_LEVEL=29
         
+        # ДОБАВЛЕНО: путь к заголовкам GLES
         INCLUDES="-I./jni \
                   -I$SYSROOT/usr/include \
-                  -I$SYSROOT/usr/include/aarch64-linux-android"
+                  -I$SYSROOT/usr/include/aarch64-linux-android \
+                  -I$NDK_PATH/sources/third_party/libigl/include \
+                  -I$NDK_PATH/sources/android/native_app_glue"
         
         CXXFLAGS="-O2 -fPIC -std=c++17 \
                   -stdlib=libc++ \
@@ -48,7 +51,8 @@ jobs:
                   -DIMGUI_IMPL_OPENGL_ES3 \
                   -D__STDC_FORMAT_MACROS \
                   -Wall -Wextra \
-                  -Wno-unused-parameter"
+                  -Wno-unused-parameter \
+                  -DGL_GLEXT_PROTOTYPES"
         
         LDFLAGS="-shared \
                  -Wl,-soname,libnative.so \
