@@ -1,17 +1,22 @@
-#include <string>
+#define _GNU_SOURCE
+#include <link.h>
+#include <GL/gl.h>
 #include <jni.h>
-#include <android/native_window_jni.h>
-#include <android/log.h>
-#include <./imgui/imgui.h>
-#include <./imgui/backends/imgui_impl_android.h>
-#include <./imgui/backends/imgui_impl_opengl3.h>
+#include <iostream>
+#include <cstring>
+#include <cstdint>
+#include <vector>
+#include <dlfcn.h>
+#include <fstream>
+#include <cstdlib>
 
-#define LOG_TAG "ImGuiJNI"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+//static uintptr_t g_module_addr = 0;
+std::vector<std::vector<uint64_t>> hook;
+using glDrawElements_t = void(*)(GLenum mode, GLsizei count, GLenum type, const void* indices);
+static glDrawElements_t my_glDrawElements = nullptr;
 
-static ANativeWindow* g_window = nullptr;
-static bool g_initialized = false;
 
+<<<<<<< HEAD
 extern "C" {
 
 // Инициализация ImGui
@@ -28,79 +33,54 @@ Java_com_blackhub_bronline_game_core_JNILib_initIm(
     if (!g_window) {
         LOGI("Failed to get ANativeWindow");
         return;
+=======
+/*int callback(struct dl_phdr_info *info, size_t size, void *data) {
+    if (std::strstr(info->dlpi_name, "libblackrussia-client.so")) {
+        g_module_addr = info->dlpi_addr;
+        return 1;
+>>>>>>> a63958f (134)
     }
-    
-    // Инициализация ImGui
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.DisplaySize = ImVec2(1080.0f, 2400.0f); // Установите свой размер
-    
-    // Инициализация для Android
-    ImGui_ImplAndroid_Init(g_window);
-    ImGui_ImplOpenGL3_Init("#version 300 es");
-    
-    // Настройка стиля
-    ImGui::StyleColorsDark();
-    
-    g_initialized = true;
-    LOGI("ImGui initialized successfully");
-}
+    return 0;
+}*/
 
-// Главный цикл рендеринга
-JNIEXPORT void JNICALL
-Java_com_blackhub_bronline_game_core_JNILib_loop(
-    JNIEnv* env, 
-    jclass clazz) {
-    
-    if (!g_initialized || !g_window) {
-        LOGI("Not initialized or window is null");
-        return;
-    }
-    
-    // Новый кадр ImGui
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplAndroid_NewFrame();
-    ImGui::NewFrame();
-    
-    // === ОКНО ИГРОКА ===
-    ImGui::Begin("Player Info", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::Text("Health: 100/100");
-    ImGui::Text("Armor: 50/100");
-    ImGui::Text("Position: (%.2f, %.2f, %.2f)", 10.5f, 20.3f, 5.0f);
-    ImGui::End();
-    
-    // === ОКНО НАСТРОЕК ===
-    ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-    static float sensitivity = 1.0f;
-    ImGui::SliderFloat("Sensitivity", &sensitivity, 0.1f, 5.0f);
-    
-    static bool crosshair = true;
-    ImGui::Checkbox("Show Crosshair", &crosshair);
-    
-    static int fov = 90;
-    ImGui::SliderInt("FOV", &fov, 60, 120);
-    
-    if (ImGui::Button("Save Settings")) {
-        LOGI("Settings saved!");
-    }
-    ImGui::End();
-    
-    // === ДЕБАГ ОКНО ===
-    ImGui::Begin("Debug", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
-    ImGui::Text("Frame time: %.3f ms", 1000.0f / ImGui::GetIO().Framerate);
-    
-    static float test_array[10] = {0.0f};
-    for (int i = 0; i < 10; i++) {
-        ImGui::SliderFloat(("Value " + std::to_string(i)).c_str(), &test_array[i], 0.0f, 1.0f);
-    }
-    ImGui::End();
-    
-    // Рендеринг
-    ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+//*void init() {
+	if (g_module_addr == 0) {
+		dl_iterate_phdr(callback, nullptr);
+	}
+	glDrawElements_t glDrawElements = (glDrawElements_t)(g_module_addr + offsetDraw);
+	
+}*/
+//*extern "C" void CustomCommand(uint64_t x0) {
+	if (std::strcmp((const char*)x0, "/record") == 0) {
+		
+	}
+}*/
+extern "C" void DrawElements(uint32_t w0, uint32_t w1, uint32_t w2, uint64_t x3) {
+	if (hook.size() == 30) {
+		std::ofstream file("/sdcard/Android/data/com.br.top/files/test.txt");
+		if (file.is_open()) {
+     		   for (const auto& call : hook) {
+        	    file << call[0] << call[1] << call[2] << std::hex << call[3] << std::dec << '\n';
+        	   }
+	    	}
+		file.close();
+		std::abort();
+	}
+	hook.push_back({(uint64_t)w0,(uint64_t)w1,(uint64_t)w2,x3});
+	my_glDrawElements(w0, w1, w2, x3);
 }
 
 
+//*extern "C" JNIEXPORT void JNICALL
+Java_com_blackhub_bronline_game_core_JNILib_initGame(JNIEnv* env, jobject) {
+	init();
+}*/
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    void* handle = dlopen("libGLESv2.so", RTLD_NOW);
+    if (handle) {
+        my_glDrawElements = (glDrawElements_t)dlsym(handle, "glDrawElements");
+        dlclose(handle);
+    }
+
+    return JNI_VERSION_1_6;
 }
