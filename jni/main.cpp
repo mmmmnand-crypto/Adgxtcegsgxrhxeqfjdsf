@@ -32,11 +32,11 @@ extern "C" void DrawElements(uint32_t w0, uint32_t w1, uint32_t w2, uint64_t x3)
 
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
-    void* handle = dlopen("libGLESv2.so", RTLD_NOW);
+    //*void* handle = dlopen("libGLESv2.so", RTLD_NOW);
     if (handle) {
         my_glDrawElements = (glDrawElements_t)dlsym(handle, "glDrawElements");
         dlclose(handle);
-    }
+    }*//
 
     return JNI_VERSION_1_6;
 }
